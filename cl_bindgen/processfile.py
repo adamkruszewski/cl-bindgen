@@ -215,7 +215,20 @@ def _process_record(name, actual_type, cursor, output, options):
 
     for field in this_type.get_fields():
         field_name = _mangle_string(field.spelling.lower(), options.name_manglers)
-        if field.is_anonymous():
+        if field.is_anonymous and field.type.kind == clang.TypeKind.RECORD:
+            # We have found a anonymous union as a field, i.e. struct a { union {int a; int b;} }
+            # We are treating it as it would look like struct a { union a-anonymous {int a; int b;} }
+            # as CFFI doesn't support nested anonymous unions.
+            #
+            # Memory layout of those is the same, but the access to the fields is different.
+            # This only support ONE anonymous union inside a struct, as the name is always the same.
+            #
+            # We declare a helper named union and associate it with the currently processed RECORD
+            # as CFFI doesn't support nested anonymous unions. See: https://github.com/cffi/cffi/pull/117
+            field_name = _mangle_string(cursor.spelling.lower()+"_anonymous", options.name_manglers)
+            _process_record(field_name, _ElaboratedType.UNION, field, output, options)
+            field_type =  "(:union " + field_name + ")"
+        elif field.is_anonymous():
             assert(field.type.kind == clang.TypeKind.ELABORATED)
             inner_name = name + '-' + field_name
             actual_elaborated_type = _determine_elaborated_type(field.type)
